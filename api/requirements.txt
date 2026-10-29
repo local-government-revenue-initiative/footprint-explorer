@@ -1,0 +1,5 @@
+fastapi
+uvicorn
+overturemaps
+shapely>=2
+pyarrow
