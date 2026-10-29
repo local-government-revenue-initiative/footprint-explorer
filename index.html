@@ -1,0 +1,500 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Building Footprint Explorer</title>
+<meta name="description" content="Draw a zone on satellite imagery and get Overture Maps building footprint statistics for property-tax base screening.">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+<style>
+  :root{
+    --bg:#f6f7f9; --panel:#ffffff; --ink:#1b2430; --muted:#667085; --line:#e3e7ee;
+    --accent:#0f6b5c; --accent-ink:#ffffff; --warn:#9a5b00; --warn-bg:#fff4e0; --err:#a4262c;
+    --bar:#0f6b5c; --bar-bg:#e8f1ef;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#12161c; --panel:#1a2029; --ink:#e8ecf2; --muted:#9aa5b5; --line:#2b3441;
+      --accent:#3fb8a1; --accent-ink:#0b1512; --warn:#f0b35a; --warn-bg:#2a2214; --err:#ff8a8f;
+      --bar:#3fb8a1; --bar-bg:#1f2d2b; }
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink);
+       display:grid;grid-template-columns:380px 1fr;grid-template-rows:100%}
+  aside{background:var(--panel);border-right:1px solid var(--line);overflow-y:auto;padding:16px 16px 40px}
+  #map{height:100%;width:100%;background:#222}
+  h1{font-size:17px;margin:0 0 2px}
+  h2{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:20px 0 8px}
+  .sub{color:var(--muted);margin:0 0 6px;font-size:12.5px}
+  input[type=text],input[type=number]{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;
+       background:var(--bg);color:var(--ink);font:inherit}
+  button{font:inherit;cursor:pointer;border:1px solid var(--line);background:var(--bg);color:var(--ink);
+       padding:7px 10px;border-radius:8px}
+  button:hover:not(:disabled){border-color:var(--accent)}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600;width:100%;padding:10px}
+  button.active{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+  .row{display:flex;gap:6px;flex-wrap:wrap}
+  .row>*{flex:1 1 auto}
+  .tools button{flex:1 1 45%}
+  #results-list{list-style:none;margin:6px 0 0;padding:0}
+  #results-list li{padding:7px 8px;border:1px solid var(--line);border-radius:8px;margin-bottom:5px;cursor:pointer;font-size:13px}
+  #results-list li:hover{border-color:var(--accent)}
+  .note{font-size:12px;color:var(--muted)}
+  .warn{background:var(--warn-bg);color:var(--warn);padding:8px 10px;border-radius:8px;font-size:12.5px;margin-top:8px}
+  #status{margin-top:8px;font-size:12.5px;min-height:18px}
+  #status.err{color:var(--err)}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  td{padding:5px 0;border-bottom:1px solid var(--line)}
+  td:last-child{text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
+  .bar-row{display:grid;grid-template-columns:78px 1fr 64px;gap:8px;align-items:center;margin:4px 0;font-size:12.5px}
+  .bar-track{background:var(--bar-bg);height:14px;border-radius:4px;overflow:hidden}
+  .bar-fill{background:var(--bar);height:100%}
+  .bar-row span:last-child{text-align:right;font-variant-numeric:tabular-nums}
+  details summary{cursor:pointer;color:var(--muted);font-size:12.5px}
+  label.small{font-size:12px;color:var(--muted);display:block;margin:8px 0 3px}
+  .g-link{background:rgba(255,255,255,.85);color:#1b2430;font-size:11px;padding:2px 7px;border-radius:4px;text-decoration:none;margin:0 0 4px 10px}
+  .g-link:hover{background:#fff;text-decoration:underline}
+  @media (max-width:800px){
+    body{grid-template-columns:1fr;grid-template-rows:55vh auto;height:auto}
+    html,body{height:auto}
+    #map{height:55vh;order:-1}
+    aside{border-right:0;border-top:1px solid var(--line);overflow:visible}
+  }
+</style>
+</head>
+<body>
+<aside>
+  <h1>Building Footprint Explorer</h1>
+  <p class="sub">Overture Maps buildings, drawn zone statistics for property-tax base screening.</p>
+
+  <h2>1. Find a place</h2>
+  <form id="search-form" class="row">
+    <input type="text" id="q" placeholder="Country, region, province or city" autocomplete="off" style="flex:1 1 70%">
+    <button type="submit" style="flex:0 0 auto">Search</button>
+  </form>
+  <ul id="results-list"></ul>
+  <button id="btn-boundary" disabled style="margin-top:6px;width:100%">Use the place boundary as the zone</button>
+
+  <h2>2. Draw the zone</h2>
+  <div class="row tools">
+    <button data-mode="rect">Rectangle</button>
+    <button data-mode="circle">Circle</button>
+    <button data-mode="polygon">Polygon</button>
+    <button data-mode="free">Freehand</button>
+  </div>
+  <div class="row" style="margin-top:6px">
+    <button id="btn-finish" disabled>Finish polygon</button>
+    <button id="btn-clear">Clear zone</button>
+  </div>
+  <p class="note" id="draw-help" style="margin-top:6px">Rectangle, circle and freehand: press and drag. Polygon: click each vertex, then double-click or press Finish.</p>
+  <p class="note" id="zone-info"></p>
+
+  <h2>3. Buildings</h2>
+  <label class="small" for="api">API address (your Render / Hugging Face URL)</label>
+  <input type="text" id="api" placeholder="https://your-service.onrender.com">
+  <label class="small" for="thr">Taxable area threshold (m²)</label>
+  <input type="number" id="thr" value="25" min="0" step="1">
+  <label class="small" for="maxkm">Maximum zone area (km²)</label>
+  <input type="number" id="maxkm" value="100" min="1" step="1">
+  <div style="margin-top:12px"><button id="btn-run" class="primary" disabled>Get buildings and statistics</button></div>
+  <div id="status"></div>
+
+  <div id="out" hidden>
+    <h2>Statistics</h2>
+    <table id="stats"></table>
+    <h2>Size categories</h2>
+    <div id="cats"></div>
+    <p class="note" id="cat-note"></p>
+    <h2>Building class (Overture)</h2>
+    <div id="classes"></div>
+    <h2>Export</h2>
+    <div class="row">
+      <button id="btn-csv">CSV</button>
+      <button id="btn-geojson">GeoJSON</button>
+    </div>
+    <div class="warn">Screening tool. Counts come from modelled footprints (Overture merges Microsoft, Google and OSM sources), not a field survey. Buildings are kept when their centroid falls inside the zone; footprints are not cut at the zone edge. Floors are estimated as height ÷ 3 m (minimum 1) and only where Overture provides a height.</div>
+  </div>
+
+  <h2>Notes</h2>
+  <details>
+    <summary>How it works</summary>
+    <p class="note">The page sends the bounding box of your zone to a small Python service that reads Overture Maps with the <code>overturemaps</code> package (same method as the AMALI scripts) and returns the footprints. Imagery: Esri World Imagery. Search: OpenStreetMap Nominatim. Statistics follow the Python scripts (taxable threshold, size categories, floors = height ÷ 3).</p>
+  </details>
+</aside>
+<div id="map"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Turf.js/6.5.0/turf.min.js"></script>
+<script type="module">
+/* ------------------------------------------------------------------ */
+/* Helpers                                                              */
+/* ------------------------------------------------------------------ */
+const $ = (id) => document.getElementById(id);
+const fmt = (n, d = 0) => Number.isFinite(n) ? n.toLocaleString('en-US', {minimumFractionDigits: d, maximumFractionDigits: d}) : 'n/a';
+const status = (msg, err = false) => { const s = $('status'); s.textContent = msg; s.className = err ? 'err' : ''; };
+const quantile = (sorted, q) => {
+  if (!sorted.length) return NaN;
+  const pos = (sorted.length - 1) * q, lo = Math.floor(pos), hi = Math.ceil(pos);
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo);
+};
+
+/* ------------------------------------------------------------------ */
+/* Map                                                                  */
+/* ------------------------------------------------------------------ */
+const map = L.map('map', {preferCanvas: true, zoomControl: true}).setView([5, 20], 3);
+const esri = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+  maxZoom: 19, attribution: 'Imagery &copy; Esri, Maxar, Earthstar Geographics'
+}).addTo(map);
+const labels = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
+  maxZoom: 19, attribution: 'Labels &copy; Esri'
+}).addTo(map);
+const osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19, attribution: '&copy; OpenStreetMap contributors'
+});
+L.control.layers({'Satellite (Esri)': esri, 'OpenStreetMap': osm}, {'Place names': labels}, {collapsed: true}).addTo(map);
+L.control.scale({imperial: false}).addTo(map);
+
+/* Discreet link to Google Maps satellite (zone if drawn, else current view) */
+const gLink = L.control({position: 'bottomleft'});
+gLink.onAdd = () => {
+  const a = L.DomUtil.create('a', 'g-link');
+  a.textContent = 'Open in Google Maps satellite';
+  a.target = '_blank'; a.rel = 'noopener';
+  L.DomEvent.disableClickPropagation(a);
+  const update = () => {
+    const c = zone ? turf.center(zone).geometry.coordinates.slice().reverse() : [map.getCenter().lat, map.getCenter().lng];
+    const z = zone ? Math.min(20, Math.max(3, map.getBoundsZoom(L.geoJSON(zone).getBounds()))) : map.getZoom();
+    a.href = `https://www.google.com/maps/@${c[0].toFixed(6)},${c[1].toFixed(6)},${z}z/data=!3m1!1e3`;
+  };
+  a.addEventListener('mousedown', update);
+  a.addEventListener('touchstart', update, {passive: true});
+  a.addEventListener('focus', update);
+  a.href = 'https://www.google.com/maps/@?api=1&map_action=map&basemap=satellite'; // replaced on first click
+  return a;
+};
+gLink.addTo(map);
+
+const placeLayer = L.layerGroup().addTo(map);
+const zoneLayer = L.layerGroup().addTo(map);
+const drawLayer = L.layerGroup().addTo(map);
+const bldgLayer = L.layerGroup().addTo(map);
+
+let placeFeature = null;   // GeoJSON polygon of the searched place (if available)
+let zone = null;           // GeoJSON Feature<Polygon> of the active zone
+let buildings = [];        // [{id, area, height, floors, cls, feature}]
+
+/* ------------------------------------------------------------------ */
+/* Place search (Nominatim)                                             */
+/* ------------------------------------------------------------------ */
+$('search-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const q = $('q').value.trim();
+  if (!q) return;
+  const list = $('results-list');
+  list.innerHTML = '<li>Searching...</li>';
+  try {
+    const url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&polygon_geojson=1&limit=6&q=' + encodeURIComponent(q);
+    const res = await fetch(url, {headers: {'Accept': 'application/json'}});
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    list.innerHTML = '';
+    if (!data.length) { list.innerHTML = '<li>No result</li>'; return; }
+    data.forEach((r) => {
+      const li = document.createElement('li');
+      li.textContent = r.display_name;
+      li.addEventListener('click', () => pickPlace(r));
+      list.appendChild(li);
+    });
+  } catch (err) {
+    list.innerHTML = '';
+    status('Place search failed: ' + err.message, true);
+  }
+});
+
+function pickPlace(r) {
+  placeLayer.clearLayers();
+  placeFeature = null;
+  $('btn-boundary').disabled = true;
+  const [s, n, w, e] = r.boundingbox.map(Number);
+  map.fitBounds([[s, w], [n, e]]);
+  const g = r.geojson;
+  if (g && (g.type === 'Polygon' || g.type === 'MultiPolygon')) {
+    placeFeature = {type: 'Feature', properties: {}, geometry: g};
+    L.geoJSON(placeFeature, {style: {color: '#ffd400', weight: 2, fill: false}}).addTo(placeLayer);
+    $('btn-boundary').disabled = false;
+  }
+  $('results-list').innerHTML = '';
+}
+
+$('btn-boundary').addEventListener('click', () => {
+  if (!placeFeature) return;
+  let f = placeFeature;
+  if (f.geometry.type === 'MultiPolygon') {
+    // keep the largest part as a single polygon zone
+    let best = null, bestA = -1;
+    f.geometry.coordinates.forEach((c) => {
+      const p = turf.polygon(c), a = turf.area(p);
+      if (a > bestA) { best = p; bestA = a; }
+    });
+    f = best;
+  }
+  setZone(turf.feature(f.geometry));
+});
+
+/* ------------------------------------------------------------------ */
+/* Drawing (rectangle, circle, polygon, freehand)                       */
+/* ------------------------------------------------------------------ */
+let mode = null, dragging = false, startLL = null, pts = [], preview = null, downPx = null;
+const cont = map.getContainer();
+
+function setMode(m) {
+  mode = (mode === m) ? null : m;
+  document.querySelectorAll('.tools button').forEach((b) => b.classList.toggle('active', b.dataset.mode === mode));
+  drawLayer.clearLayers(); preview = null; pts = []; dragging = false;
+  $('btn-finish').disabled = true;
+  if (mode) {
+    map.dragging.disable(); map.doubleClickZoom.disable();
+    cont.style.cursor = 'crosshair'; cont.style.touchAction = 'none';
+  } else {
+    map.dragging.enable(); map.doubleClickZoom.enable();
+    cont.style.cursor = ''; cont.style.touchAction = '';
+  }
+}
+document.querySelectorAll('.tools button').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)));
+
+const llFromEvent = (e) => {
+  const r = cont.getBoundingClientRect();
+  return map.containerPointToLatLng(L.point(e.clientX - r.left, e.clientY - r.top));
+};
+const dragStyle = {color: '#ff4d4d', weight: 2, fillOpacity: 0.1, dashArray: '4 4'};
+
+cont.addEventListener('pointerdown', (e) => {
+  if (!mode || e.target.closest('.leaflet-control')) return;
+  downPx = [e.clientX, e.clientY];
+  const ll = llFromEvent(e);
+  if (mode === 'polygon') return;
+  dragging = true; startLL = ll; pts = [ll];
+  cont.setPointerCapture(e.pointerId);
+  drawLayer.clearLayers(); preview = null;
+});
+
+cont.addEventListener('pointermove', (e) => {
+  if (!mode) return;
+  const ll = llFromEvent(e);
+  if (mode === 'polygon') {
+    if (pts.length) { drawLayer.clearLayers(); L.polyline([...pts, ll], dragStyle).addTo(drawLayer); pts.forEach((p) => L.circleMarker(p, {radius: 3, color: '#ff4d4d'}).addTo(drawLayer)); }
+    return;
+  }
+  if (!dragging) return;
+  drawLayer.clearLayers();
+  if (mode === 'rect') preview = L.rectangle(L.latLngBounds(startLL, ll), dragStyle);
+  else if (mode === 'circle') preview = L.circle(startLL, {...dragStyle, radius: map.distance(startLL, ll)});
+  else {
+    const last = pts[pts.length - 1];
+    if (map.latLngToContainerPoint(last).distanceTo(map.latLngToContainerPoint(ll)) > 3) pts.push(ll);
+    preview = L.polyline(pts, dragStyle);
+  }
+  preview.addTo(drawLayer);
+});
+
+cont.addEventListener('pointerup', (e) => {
+  if (!mode || e.target.closest('.leaflet-control')) return;
+  const ll = llFromEvent(e);
+  if (mode === 'polygon') {
+    const moved = downPx && Math.hypot(e.clientX - downPx[0], e.clientY - downPx[1]) > 6;
+    if (!moved) { pts.push(ll); $('btn-finish').disabled = pts.length < 3; }
+    return;
+  }
+  if (!dragging) return;
+  dragging = false;
+  let feat = null;
+  if (mode === 'rect') {
+    const b = L.latLngBounds(startLL, ll);
+    if (b.getNorth() !== b.getSouth() && b.getEast() !== b.getWest())
+      feat = turf.bboxPolygon([b.getWest(), b.getSouth(), b.getEast(), b.getNorth()]);
+  } else if (mode === 'circle') {
+    const r = map.distance(startLL, ll);
+    if (r > 5) feat = turf.circle([startLL.lng, startLL.lat], r / 1000, {steps: 64, units: 'kilometers'});
+  } else if (pts.length > 3) {
+    const ring = pts.map((p) => [p.lng, p.lat]); ring.push(ring[0]);
+    feat = turf.simplify(turf.polygon([ring]), {tolerance: 0.00002, highQuality: false});
+  }
+  if (feat) { setMode(mode); setZone(feat); } else { drawLayer.clearLayers(); }
+});
+
+function finishPolygon() {
+  if (mode !== 'polygon' || pts.length < 3) return;
+  const ring = pts.map((p) => [p.lng, p.lat]); ring.push(ring[0]);
+  const feat = turf.polygon([ring]);
+  setMode('polygon'); setZone(feat);
+}
+cont.addEventListener('dblclick', (e) => {
+  if (mode !== 'polygon') return;
+  if (pts.length >= 2) pts.pop(); // the second click of the double-click added a duplicate vertex
+  finishPolygon();
+});
+$('btn-finish').addEventListener('click', finishPolygon);
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') finishPolygon();
+  if (e.key === 'Escape' && mode) setMode(mode);
+});
+
+function setZone(feat) {
+  zone = feat;
+  zoneLayer.clearLayers(); bldgLayer.clearLayers(); drawLayer.clearLayers();
+  buildings = []; $('out').hidden = true;
+  L.geoJSON(zone, {style: {color: '#ff4d4d', weight: 2, fillOpacity: 0.08}}).addTo(zoneLayer);
+  const km2 = turf.area(zone) / 1e6;
+  $('zone-info').textContent = `Zone area: ${fmt(km2, 2)} km²`;
+  $('btn-run').disabled = false;
+  status('');
+}
+$('btn-clear').addEventListener('click', () => {
+  zone = null; buildings = [];
+  zoneLayer.clearLayers(); bldgLayer.clearLayers(); drawLayer.clearLayers();
+  $('zone-info').textContent = ''; $('btn-run').disabled = true; $('out').hidden = true; status('');
+  if (mode) setMode(mode);
+});
+
+/* ------------------------------------------------------------------ */
+/* Query (Python API) and statistics                                    */
+/* ------------------------------------------------------------------ */
+// Default API address. You can also paste it in the field of the panel.
+const DEFAULT_API = '';
+try { $('api').value = localStorage.getItem('api_url') || DEFAULT_API; } catch (e) { $('api').value = DEFAULT_API; }
+
+$('btn-run').addEventListener('click', async () => {
+  if (!zone) return;
+  const api = $('api').value.trim().replace(/\/+$/, '');
+  if (!api) { status('Paste the API address first (see README).', true); return; }
+  try { localStorage.setItem('api_url', api); } catch (e) {}
+  const km2 = turf.area(zone) / 1e6;
+  const maxkm = Number($('maxkm').value) || 100;
+  if (km2 > maxkm) { status(`Zone is ${fmt(km2, 1)} km², above the ${fmt(maxkm, 0)} km² limit. Draw a smaller zone or raise the limit.`, true); return; }
+
+  const btn = $('btn-run'); btn.disabled = true;
+  const t0 = performance.now();
+  try {
+    const [minx, miny, maxx, maxy] = turf.bbox(zone);
+    status('Querying Overture through the API (the free server may need ~30 s to wake up)...');
+    const res = await fetch(`${api}/buildings?minx=${minx}&miny=${miny}&maxx=${maxx}&maxy=${maxy}`);
+    if (!res.ok) {
+      let d = ''; try { d = (await res.json()).detail || ''; } catch (e) {}
+      throw new Error(`API error ${res.status} ${d}`);
+    }
+    const fc = await res.json();
+    status('Processing footprints...');
+    await new Promise((r) => setTimeout(r, 20));
+
+    const out = [];
+    for (const feat of fc.features) {
+      const c = turf.centroid(feat);
+      if (!turf.booleanPointInPolygon(c, zone)) continue;
+      const area = turf.area(feat);
+      const p = feat.properties || {};
+      const h = p.height == null ? null : Number(p.height);
+      const nf = p.num_floors == null ? null : Number(p.num_floors);
+      feat.properties = {
+        id: p.id, area_m2: Math.round(area * 10) / 10, height_m: h, num_floors: nf,
+        floors_est: h != null ? Math.max(1, h / 3) : null, class: p.class ?? null
+      };
+      out.push({id: p.id, area, height: h, floors: feat.properties.floors_est, cls: p.class ?? 'unknown', feature: feat});
+    }
+    buildings = out;
+    render(out, Number($('thr').value) || 25);
+    status(`Done in ${((performance.now() - t0) / 1000).toFixed(1)} s. ${fmt(out.length)} buildings in the zone.`);
+  } catch (err) {
+    console.error(err);
+    status('Query failed: ' + (err && err.message ? err.message : err), true);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+function render(list, thr) {
+  bldgLayer.clearLayers();
+  if (!list.length) { $('out').hidden = true; status('No building found in this zone.', true); return; }
+  const MAX_DRAW = 40000;
+  const drawSet = list.length > MAX_DRAW ? list.slice(0, MAX_DRAW) : list;
+  L.geoJSON({type: 'FeatureCollection', features: drawSet.map((b) => b.feature)}, {
+    style: (f) => ({color: f.properties.area_m2 >= thr ? '#2ee6c4' : '#ffb347', weight: 1, fillOpacity: 0.35})
+  }).addTo(bldgLayer);
+
+  const areas = list.map((b) => b.area).sort((a, b) => a - b);
+  const total = areas.reduce((s, a) => s + a, 0);
+  const taxable = list.filter((b) => b.area >= thr);
+  const withH = list.filter((b) => b.height != null);
+  const withF = list.filter((b) => b.floors != null);
+  const zoneKm2 = turf.area(zone) / 1e6;
+  const mean = (arr) => arr.reduce((s, x) => s + x, 0) / arr.length;
+
+  const rowsHtml = [
+    ['Zone area (km²)', fmt(zoneKm2, 2)],
+    ['Buildings (total)', fmt(list.length)],
+    [`Est. taxable buildings (≥ ${thr} m²)`, `${fmt(taxable.length)} (${fmt(100 * taxable.length / list.length, 1)}%)`],
+    ['Total footprint area (m²)', fmt(total)],
+    ['Taxable footprint area (m²)', fmt(taxable.reduce((s, b) => s + b.area, 0))],
+    ['Mean footprint (m²)', fmt(mean(areas), 1)],
+    ['Median footprint (m²)', fmt(quantile(areas, 0.5), 1)],
+    ['25th / 75th percentile (m²)', `${fmt(quantile(areas, 0.25), 1)} / ${fmt(quantile(areas, 0.75), 1)}`],
+    ['Buildings with height data', `${fmt(withH.length)} (${fmt(100 * withH.length / list.length, 1)}%)`],
+    ['Mean height (m)', withH.length ? fmt(mean(withH.map((b) => b.height)), 1) : 'n/a'],
+    ['Est. average floors', withF.length ? fmt(mean(withF.map((b) => b.floors)), 2) : 'n/a'],
+    ['Buildings per km²', fmt(list.length / zoneKm2, 0)],
+    ['Built coverage of the zone', fmt(100 * total / (zoneKm2 * 1e6), 1) + '%']
+  ];
+  $('stats').innerHTML = rowsHtml.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
+
+  const bins = [
+    ['< ' + thr + ' m²*', (a) => a < thr],
+    [thr + '–50', (a) => a >= thr && a < 50],
+    ['50–100', (a) => a >= 50 && a < 100],
+    ['100–200', (a) => a >= 100 && a < 200],
+    ['200–500', (a) => a >= 200 && a < 500],
+    ['> 500 m²**', (a) => a >= 500]
+  ];
+  // when the threshold is not 25, keep the first two bins consistent with it
+  const counts = bins.map(([, f]) => areas.filter(f).length);
+  const maxC = Math.max(...counts, 1);
+  $('cats').innerHTML = bins.map(([name], i) =>
+    `<div class="bar-row"><span>${name}</span><div class="bar-track"><div class="bar-fill" style="width:${100 * counts[i] / maxC}%"></div></div><span>${fmt(counts[i])}</span></div>`).join('');
+  $('cat-note').textContent = `* Likely sheds, informal or non-taxable structures. ** Potential commercial and institutional buildings.` +
+    (list.length > MAX_DRAW ? ` Map shows the first ${fmt(MAX_DRAW)} buildings only; statistics use all.` : '');
+
+  const cls = {};
+  list.forEach((b) => { cls[b.cls] = (cls[b.cls] || 0) + 1; });
+  const top = Object.entries(cls).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  const maxK = top[0][1];
+  $('classes').innerHTML = top.map(([k, v]) =>
+    `<div class="bar-row"><span title="${k}" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${k}</span><div class="bar-track"><div class="bar-fill" style="width:${100 * v / maxK}%"></div></div><span>${fmt(v)}</span></div>`).join('');
+
+  $('out').hidden = false;
+}
+$('thr').addEventListener('change', () => { if (buildings.length) render(buildings, Number($('thr').value) || 25); });
+
+/* ------------------------------------------------------------------ */
+/* Export                                                               */
+/* ------------------------------------------------------------------ */
+function download(name, text, type) {
+  const url = URL.createObjectURL(new Blob([text], {type}));
+  const a = document.createElement('a'); a.href = url; a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+$('btn-csv').addEventListener('click', () => {
+  if (!buildings.length) return;
+  const thr = Number($('thr').value) || 25;
+  const lines = ['id,area_m2,height_m,num_floors,floors_est,class,taxable'];
+  buildings.forEach((b) => {
+    const p = b.feature.properties;
+    lines.push([b.id, p.area_m2, p.height_m ?? '', p.num_floors ?? '', p.floors_est != null ? p.floors_est.toFixed(2) : '', p.class ?? '', b.area >= thr ? 1 : 0].join(','));
+  });
+  download('buildings_zone.csv', lines.join('\n'), 'text/csv');
+});
+$('btn-geojson').addEventListener('click', () => {
+  if (!buildings.length) return;
+  download('buildings_zone.geojson', JSON.stringify({type: 'FeatureCollection', features: buildings.map((b) => b.feature)}), 'application/geo+json');
+});
+</script>
+</body>
+</html>
