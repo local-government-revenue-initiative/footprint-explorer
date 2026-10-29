@@ -1,5 +1,5 @@
 fastapi
 uvicorn
-overturemaps
+overturemaps==1.0.2
 shapely>=2
 pyarrow
