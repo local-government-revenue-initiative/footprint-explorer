@@ -91,8 +91,6 @@
   <p class="note" id="zone-info"></p>
 
   <h2>3. Buildings</h2>
-  <label class="small" for="api">API address (your Render / Hugging Face URL)</label>
-  <input type="text" id="api" placeholder="https://your-service.onrender.com">
   <label class="small" for="thr">Taxable area threshold (m²)</label>
   <input type="number" id="thr" value="25" min="0" step="1">
   <label class="small" for="maxkm">Maximum zone area (km²)</label>
@@ -360,15 +358,12 @@ $('btn-clear').addEventListener('click', () => {
 /* ------------------------------------------------------------------ */
 /* Query (Python API) and statistics                                    */
 /* ------------------------------------------------------------------ */
-// Default API address. You can also paste it in the field of the panel.
-const DEFAULT_API = '';
-try { $('api').value = localStorage.getItem('api_url') || DEFAULT_API; } catch (e) { $('api').value = DEFAULT_API; }
+// Address of the Overture API (Render). Change it here if the service moves.
+const API_URL = 'https://footprint-explorer.onrender.com';
 
 $('btn-run').addEventListener('click', async () => {
   if (!zone) return;
-  const api = $('api').value.trim().replace(/\/+$/, '');
-  if (!api) { status('Paste the API address first (see README).', true); return; }
-  try { localStorage.setItem('api_url', api); } catch (e) {}
+  const api = API_URL;
   const km2 = turf.area(zone) / 1e6;
   const maxkm = Number($('maxkm').value) || 100;
   if (km2 > maxkm) { status(`Zone is ${fmt(km2, 1)} km², above the ${fmt(maxkm, 0)} km² limit. Draw a smaller zone or raise the limit.`, true); return; }
