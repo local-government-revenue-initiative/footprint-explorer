@@ -106,6 +106,7 @@
     <p class="note" id="cat-note"></p>
     <h2>Export</h2>
     <div class="row">
+      <button id="btn-xlsx">Excel (stats + data)</button>
       <button id="btn-csv">CSV</button>
       <button id="btn-geojson">GeoJSON</button>
     </div>
@@ -122,6 +123,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Turf.js/6.5.0/turf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script type="module">
 /* ------------------------------------------------------------------ */
 /* Helpers                                                              */
@@ -480,6 +482,81 @@ $('btn-csv').addEventListener('click', () => {
     lines.push([b.id, p.area_m2, p.height_m ?? '', p.num_floors ?? '', p.floors_est != null ? p.floors_est.toFixed(2) : '', p.class ?? '', b.area >= thr ? 1 : 0].join(','));
   });
   download('buildings_zone.csv', lines.join('\n'), 'text/csv');
+});
+$('btn-xlsx').addEventListener('click', () => {
+  if (!buildings.length) return;
+  if (typeof XLSX === 'undefined') { status('Excel library not loaded. Use the CSV export.', true); return; }
+  const thr = Number($('thr').value) || 25;
+  const list = buildings;
+  const areas = list.map((b) => b.area).sort((a, b) => a - b);
+  const total = areas.reduce((s, a) => s + a, 0);
+  const taxable = list.filter((b) => b.area >= thr);
+  const withH = list.filter((b) => b.height != null);
+  const zoneKm2 = turf.area(zone) / 1e6;
+  const mean = (arr) => arr.reduce((s, x) => s + x, 0) / arr.length;
+  const r1 = (x) => Math.round(x * 10) / 10;
+  const showH = withH.length / list.length >= HEIGHT_MIN_SHARE;
+
+  const stats = [
+    ['Indicator', 'Value', 'Unit'],
+    ['Zone area', r1(zoneKm2 * 100) / 10, 'km2'],
+    ['Buildings (total)', list.length, 'count'],
+    ['Taxable threshold', thr, 'm2'],
+    ['Est. taxable buildings', taxable.length, 'count'],
+    ['Est. taxable buildings, share', r1(100 * taxable.length / list.length), '%'],
+    ['Total footprint area', Math.round(total), 'm2'],
+    ['Taxable footprint area', Math.round(taxable.reduce((s, b) => s + b.area, 0)), 'm2'],
+    ['Mean footprint', r1(mean(areas)), 'm2'],
+    ['Median footprint', r1(quantile(areas, 0.5)), 'm2'],
+    ['25th percentile footprint', r1(quantile(areas, 0.25)), 'm2'],
+    ['75th percentile footprint', r1(quantile(areas, 0.75)), 'm2'],
+    ['Buildings with height data', withH.length, 'count'],
+    ['Buildings with height data, share', r1(100 * withH.length / list.length), '%'],
+    ...(showH ? [
+      ['Mean height', r1(mean(withH.map((b) => b.height))), 'm'],
+      ['Est. average floors (height / 3, min 1)', Math.round(mean(withH.map((b) => Math.max(1, b.height / 3))) * 100) / 100, 'floors']
+    ] : [['Height and floors', 'not reported (coverage below 20%)', '']]),
+    ['Buildings per km2', Math.round(list.length / zoneKm2), 'count/km2'],
+    ['Built coverage of the zone', r1(100 * total / (zoneKm2 * 1e6)), '%']
+  ];
+
+  const bins = [
+    ['< ' + thr + ' m2 (likely sheds, informal)', (a) => a < thr],
+    [thr + ' to 50 m2', (a) => a >= thr && a < 50],
+    ['50 to 100 m2', (a) => a >= 50 && a < 100],
+    ['100 to 200 m2', (a) => a >= 100 && a < 200],
+    ['200 to 500 m2', (a) => a >= 200 && a < 500],
+    ['> 500 m2 (potential large non-residential)', (a) => a >= 500]
+  ];
+  const cats = [['Size category', 'Buildings', 'Share (%)']].concat(
+    bins.map(([name, f]) => { const c = areas.filter(f).length; return [name, c, r1(100 * c / list.length)]; }));
+
+  const data = [['id', 'area_m2', 'height_m', 'num_floors', 'floors_est', 'taxable']].concat(
+    list.map((b) => { const p = b.feature.properties;
+      return [b.id, p.area_m2, p.height_m ?? '', p.num_floors ?? '', p.floors_est != null ? Math.round(p.floors_est * 100) / 100 : '', b.area >= thr ? 1 : 0]; }));
+
+  const c = turf.center(zone).geometry.coordinates;
+  const notes = [
+    ['Building Footprint Explorer, export'],
+    ['Date', new Date().toISOString().slice(0, 10)],
+    ['Zone centre (lon, lat)', c[0].toFixed(5) + ', ' + c[1].toFixed(5)],
+    ['Source', 'Overture Maps buildings (merges Microsoft, Google and OSM sources)'],
+    ['Method', 'Buildings kept when their centroid falls inside the zone; footprints are not cut at the zone edge. Areas computed on the sphere (Turf.js).'],
+    ['Floors', 'height / 3 m, minimum 1; shown only when at least 20% of buildings have a height.'],
+    ['Caveat', 'Screening tool. Counts come from modelled footprints and are not 100% accurate.']
+  ];
+
+  const wb = XLSX.utils.book_new();
+  const add = (name, rows, widths) => {
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws['!cols'] = widths.map((w) => ({wch: w}));
+    XLSX.utils.book_append_sheet(wb, ws, name);
+  };
+  add('Statistics', stats, [42, 18, 12]);
+  add('Size categories', cats, [44, 12, 12]);
+  add('Buildings', data, [38, 10, 10, 11, 11, 8]);
+  add('Notes', notes, [24, 110]);
+  XLSX.writeFile(wb, 'buildings_zone.xlsx');
 });
 $('btn-geojson').addEventListener('click', () => {
   if (!buildings.length) return;
