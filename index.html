@@ -106,7 +106,7 @@
     <p class="note" id="cat-note"></p>
     <h2>Export</h2>
     <div class="row">
-      <button id="btn-xlsx">Excel (stats + data)</button>
+      <button id="btn-xlsx">XLSX (stats)</button>
       <button id="btn-csv">CSV</button>
       <button id="btn-geojson">GeoJSON</button>
     </div>
@@ -488,7 +488,7 @@ $('btn-csv').addEventListener('click', () => {
 });
 $('btn-xlsx').addEventListener('click', () => {
   if (!buildings.length) return;
-  if (typeof XLSX === 'undefined') { status('Excel library not loaded. Use the CSV export.', true); return; }
+  if (typeof XLSX === 'undefined') { status('XLSX library not loaded.', true); return; }
   const thr = Number($('thr').value) || 15;
   const list = buildings;
   const areas = list.map((b) => b.area).sort((a, b) => a - b);
@@ -534,10 +534,6 @@ $('btn-xlsx').addEventListener('click', () => {
   const cats = [['Size category', 'Buildings', 'Share (%)']].concat(
     bins.map(([name, f]) => { const c = areas.filter(f).length; return [name, c, r1(100 * c / list.length)]; }));
 
-  const data = [['id', 'area_m2', 'height_m', 'num_floors', 'floors_est', 'taxable']].concat(
-    list.map((b) => { const p = b.feature.properties;
-      return [b.id, p.area_m2, p.height_m ?? '', p.num_floors ?? '', p.floors_est != null ? Math.round(p.floors_est * 100) / 100 : '', b.area >= thr ? 1 : 0]; }));
-
   const c = turf.center(zone).geometry.coordinates;
   const notes = [
     ['Building Footprint Explorer, export'],
@@ -557,9 +553,8 @@ $('btn-xlsx').addEventListener('click', () => {
   };
   add('Statistics', stats, [42, 18, 12]);
   add('Size categories', cats, [44, 12, 12]);
-  add('Buildings', data, [38, 10, 10, 11, 11, 8]);
   add('Notes', notes, [24, 110]);
-  XLSX.writeFile(wb, 'buildings_zone.xlsx');
+  XLSX.writeFile(wb, 'buildings_zone_stats.xlsx');
 });
 $('btn-geojson').addEventListener('click', () => {
   if (!buildings.length) return;
