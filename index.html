@@ -360,6 +360,7 @@ $('btn-clear').addEventListener('click', () => {
 /* ------------------------------------------------------------------ */
 // Address of the Overture API (Render). Change it here if the service moves.
 const API_URL = 'https://footprint-explorer.onrender.com';
+const TOO_DENSE = 'Zone too dense for this tool, draw a smaller zone. If the zone is already small, the service may be restarting: retry in a minute.';
 
 $('btn-run').addEventListener('click', async () => {
   if (!zone) return;
@@ -375,6 +376,7 @@ $('btn-run').addEventListener('click', async () => {
     status('Querying Overture through the API (the free server may need ~30 s to wake up)...');
     const res = await fetch(`${api}/buildings?minx=${minx}&miny=${miny}&maxx=${maxx}&maxy=${maxy}`);
     if (!res.ok) {
+      if ([413, 500, 502, 503, 504].includes(res.status)) throw new Error(TOO_DENSE);
       let d = ''; try { d = (await res.json()).detail || ''; } catch (e) {}
       throw new Error(`API error ${res.status} ${d}`);
     }
@@ -401,7 +403,8 @@ $('btn-run').addEventListener('click', async () => {
     status(`Done in ${((performance.now() - t0) / 1000).toFixed(1)} s. ${fmt(out.length)} buildings in the zone.`);
   } catch (err) {
     console.error(err);
-    status('Query failed: ' + (err && err.message ? err.message : err), true);
+    const m = err && err.message ? err.message : String(err);
+    status(m === TOO_DENSE ? m : (m.includes('Failed to fetch') ? TOO_DENSE : 'Query failed: ' + m), true);
   } finally {
     btn.disabled = false;
   }
