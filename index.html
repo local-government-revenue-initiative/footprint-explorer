@@ -109,13 +109,13 @@
       <button id="btn-csv">CSV</button>
       <button id="btn-geojson">GeoJSON</button>
     </div>
-    <div class="warn">Screening tool. Counts come from modelled footprints (Overture merges Microsoft, Google and OSM sources), not a field survey. Buildings are kept when their centroid falls inside the zone; footprints are not cut at the zone edge. Height and floors (height ÷ 3 m, minimum 1) are shown only when at least 20% of the buildings have a height in Overture.</div>
+    <div class="warn">Screening tool. Counts come from modelled footprints (Overture merges Microsoft, Google and OSM sources) and are therefore not 100% accurate. Buildings are kept when their centroid falls inside the zone; footprints are not cut at the zone edge. Height and floors (height ÷ 3 m, minimum 1) are shown only when at least 20% of the buildings have a height in Overture.</div>
   </div>
 
   <h2>Notes</h2>
   <details>
     <summary>How it works</summary>
-    <p class="note">The page sends the bounding box of your zone to a small Python service that reads Overture Maps with the <code>overturemaps</code> package (same method as the AMALI scripts) and returns the footprints. Imagery: Esri World Imagery. Search: OpenStreetMap Nominatim. Statistics follow the Python scripts (taxable threshold, size categories, floors = height ÷ 3).</p>
+    <p class="note">The page sends the bounding box of your zone to a small Python service that reads Overture Maps with the <code>overturemaps</code> package and returns the footprints. Imagery: Esri World Imagery. Search: OpenStreetMap Nominatim. Statistics follow the Python scripts (taxable threshold, size categories, floors = height ÷ 3).</p>
   </details>
 </aside>
 <div id="map"></div>
@@ -456,7 +456,7 @@ function render(list, thr) {
   const maxC = Math.max(...counts, 1);
   $('cats').innerHTML = bins.map(([name], i) =>
     `<div class="bar-row"><span>${name}</span><div class="bar-track"><div class="bar-fill" style="width:${100 * counts[i] / maxC}%"></div></div><span>${fmt(counts[i])}</span></div>`).join('');
-  $('cat-note').textContent = `* Likely sheds, informal or non-taxable structures. ** Potential commercial and institutional buildings.` +
+  $('cat-note').textContent = `* Likely sheds, informal or non-taxable structures. ** Potential large non-residential buildings (commercial, institutional, industrial).` +
     (list.length > MAX_DRAW ? ` Map shows the first ${fmt(MAX_DRAW)} buildings only; statistics use all.` : '');
 
   $('out').hidden = false;
